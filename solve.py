@@ -15,6 +15,7 @@ TEST_DIR = 'test'
 LABELS_CSV = 'labels.csv'
 SAMPLE_SUB_CSV = 'sample_submission.csv'
 OUTPUT_CSV = 'my_submission.csv'
+BEST_MODEL_PATH = 'best_model.pth'
 
 BATCH_SIZE = 32
 EPOCHS = 5
@@ -34,7 +35,6 @@ class DogDataset(Dataset):
 
     def __getitem__(self, idx):
         img_id = self.df.iloc[idx]['id']
-        # Если в датафрейме id без расширения, добавляем '.jpg'
         img_name = f"{img_id}.jpg" if not str(img_id).endswith('.jpg') else img_id
         img_path = os.path.join(self.img_dir, img_name)
 
@@ -52,17 +52,20 @@ class DogDataset(Dataset):
 
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Используем устройство: {device}")
+    tqdm.write(f"Используемое устройство: {device}")
 
     df_labels = pd.read_csv(LABELS_CSV)
     df_sample = pd.read_csv(SAMPLE_SUB_CSV)
+
+    df_labels = df_labels.sample(n=200, random_state=42).reset_index(drop=True)
+    df_sample = df_sample.sample(n=20, random_state=42).reset_index(drop=True)
 
     breed_cols = list(df_sample.columns[1:])
     breed_to_idx = {breed: i for i, breed in enumerate(breed_cols)}
 
     df_labels['target'] = df_labels['breed'].map(breed_to_idx)
 
-    train_df, val_df = train_test_split(df_labels, test_size=0.2, random_state=42, stratify=df_labels['target'])
+    train_df, val_df = train_test_split(df_labels, test_size=0.2, random_state=42)
 
     train_transforms = transforms.Compose([
         transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
@@ -95,14 +98,14 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 
-    epoch_bar = tqdm(range(EPOCHS), desc="Всего эпох", unit="epoch")
-    for epoch in epoch_bar:
+    best_val_loss = float('inf')
+
+    for epoch in range(EPOCHS):
         model.train()
         running_loss = 0.0
 
-        train_bar = tqdm(train_loader, desc=f"Эпоха {epoch+1}/{EPOCHS} [Обучение]", leave=False, unit="batch")
-
-        for images, labels in train_bar:
+        train_progress_bar = tqdm(train_loader, desc=f"Эпоха {epoch+1}/{EPOCHS} [Обучение]", leave=False, unit="batch")
+        for images, labels in train_progress_bar:
             images, labels = images.to(device), labels.to(device)
 
             optimizer.zero_grad()
@@ -113,34 +116,46 @@ if __name__ == "__main__":
 
             running_loss += loss.item() * images.size(0)
 
-            train_bar.set_postfix(current_loss=f"{loss.item():.4f}")
-
         epoch_loss = running_loss / len(train_loader.dataset)
 
         model.eval()
         correct = 0
         total = 0
+        val_running_loss = 0.0
 
-        val_bar = tqdm(val_loader, desc=f"Эпоха {epoch+1}/{EPOCHS} [Валидация]", leave=False, unit="batch")
+        val_progress_bar = tqdm(val_loader, desc=f"Эпоха {epoch+1}/{EPOCHS} [Валидация]", leave=False, unit="batch")
         with torch.no_grad():
-            for images, labels in val_bar:
+            for images, labels in val_progress_bar:
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
+
+                loss = criterion(outputs, labels)
+                val_running_loss += loss.item() * images.size(0)
+
                 _, predicted = torch.max(outputs, 1)
                 total += labels.size(0)
                 correct += (predicted == labels).sum().item()
 
+        val_loss = val_running_loss / len(val_loader.dataset)
         accuracy = 100 * correct / total
 
-        epoch_bar.set_postfix(Loss=f"{epoch_loss:.4f}", Val_Acc=f"{accuracy:.2f}%")
+        tqdm.write(
+            f"Эпоха {epoch+1}/{EPOCHS} - Train Loss: {epoch_loss:.5f}, Val Loss: {val_loss:.5f}, Val Acc: {accuracy:.2f}%"
+        )
 
-    print("Обучение завершено успешно!")
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), BEST_MODEL_PATH)
 
+    tqdm.write("Обучение завершено")
+    tqdm.write(f"Лучший loss на валидации: {best_val_loss:.5f}")
+
+    model.load_state_dict(torch.load(BEST_MODEL_PATH))
     model.eval()
     test_ids = []
     all_preds = []
 
-    print("Начинаем предсказание для тестовой выборки...")
+    tqdm.write("Предсказание на тестовом наборе")
     with torch.no_grad():
         for images, ids in test_loader:
             images = images.to(device)
@@ -155,4 +170,4 @@ if __name__ == "__main__":
     submission_df = pd.DataFrame(all_preds, columns=breed_cols)
     submission_df.insert(0, 'id', [os.path.splitext(f)[0] for f in test_ids])
     submission_df.to_csv(OUTPUT_CSV, index=False)
-    print(f"Файл ответов сохранен как '{OUTPUT_CSV}'. Готов к отправке!")
+    tqdm.write(f"Файл ответов сохранен как '{OUTPUT_CSV}'. Готов к отправке!")
