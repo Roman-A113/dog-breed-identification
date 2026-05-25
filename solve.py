@@ -17,10 +17,9 @@ SAMPLE_SUB_CSV = 'sample_submission.csv'
 OUTPUT_CSV = 'my_submission.csv'
 BEST_MODEL_PATH = 'best_model.pth'
 
-BATCH_SIZE = 32
-EPOCHS = 5
+BATCH_SIZE = 16
 LEARNING_RATE = 1e-4
-IMAGE_SIZE = 224
+IMAGE_SIZE = 300
 
 
 class DogDataset(Dataset):
@@ -97,21 +96,27 @@ def prepare_data_loaders(train_df, valid_df, test_df, train_transforms, val_tran
 
 
 def prepare_model(device, test_df):
-    model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-    num_features = model.fc.in_features
+    model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.DEFAULT)
+
+    for param in model.parameters():
+        param.requires_grad = False
+
+    num_features = model.classifier[1].in_features
     num_classes = len(test_df.columns) - 1
-    model.fc = nn.Linear(num_features, num_classes)
+    model.classifier[1] = nn.Linear(num_features, num_classes)
+
     model = model.to(device)
     return model
 
 
-def valid_epoch(model, valid_loader, device, criterion, epoch):
+def valid_epoch(model, valid_loader, device, criterion, epoch, current_stage_epochs, stage_name):
     model.eval()
     correct = 0
     total = 0
     val_running_loss = 0.0
 
-    valid_progress_bar = tqdm(valid_loader, desc=f"Эпоха {epoch+1}/{EPOCHS} [Валидация]", leave=False, unit="batch")
+    desc_str = f"[{stage_name}] Эпоха {epoch+1}/{current_stage_epochs} [Валидация]"
+    valid_progress_bar = tqdm(valid_loader, desc=desc_str, leave=False, unit="batch")
     with torch.no_grad():
         for images, labels in valid_progress_bar:
             images, labels = images.to(device), labels.to(device)
@@ -129,10 +134,12 @@ def valid_epoch(model, valid_loader, device, criterion, epoch):
     return val_loss, accuracy
 
 
-def train_epoch(model, train_loader, device, criterion, optimizer, epoch):
+def train_epoch(model, train_loader, device, criterion, optimizer, epoch, current_stage_epochs, stage_name):
     model.train()
     running_loss = 0.0
-    train_progress_bar = tqdm(train_loader, desc=f"Эпоха {epoch+1}/{EPOCHS} [Обучение]", leave=False, unit="batch")
+
+    desc_str = f"[{stage_name}] Эпоха {epoch+1}/{current_stage_epochs} [Обучение]"
+    train_progress_bar = tqdm(train_loader, desc=desc_str, leave=False, unit="batch")
     for images, labels in train_progress_bar:
         images, labels = images.to(device), labels.to(device)
 
@@ -148,31 +155,32 @@ def train_epoch(model, train_loader, device, criterion, optimizer, epoch):
     return epoch_loss
 
 
-def train_model(model, train_loader, valid_loader, device):
+def train_model(model, train_loader, valid_loader, device, optimizer, epochs, stage_name, scheduler=None):
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     best_val_loss = float('inf')
 
-    for epoch in range(EPOCHS):
-        epoch_loss = train_epoch(model, train_loader, device, criterion, optimizer, epoch)
+    for epoch in range(epochs):
+        epoch_loss = train_epoch(model, train_loader, device, criterion, optimizer, epoch, epochs, stage_name)
+        valid_loss, accuracy = valid_epoch(model, valid_loader, device, criterion, epoch, epochs, stage_name)
 
-        valid_loss, accuracy = valid_epoch(model, valid_loader, device, criterion, epoch)
+        if scheduler:
+            scheduler.step()
 
         tqdm.write(
-            f"Эпоха {epoch+1}/{EPOCHS} - Train Loss: {epoch_loss:.5f}, Val Loss: {valid_loss:.5f}, Val Acc: {accuracy:.2f}%"
+            f"[{stage_name}] Эпоха {epoch+1}/{epochs} - Train Loss: {epoch_loss:.5f}, Val Loss: {valid_loss:.5f}, Val Acc: {accuracy:.2f}%"
         )
 
         if valid_loss < best_val_loss:
             best_val_loss = valid_loss
             torch.save(model.state_dict(), BEST_MODEL_PATH)
 
-    tqdm.write(f"Лучший loss на валидации: {best_val_loss:.5f}")
+    tqdm.write(f"[{stage_name}] Лучший loss на валидации: {best_val_loss:.5f}\n")
 
 
 def test_model(device, test_loader, model):
     model.eval()
     all_preds = []
-    test_bar = tqdm(test_loader, desc="Тест", leave=True, unit="batch")
+    test_bar = tqdm(test_loader, desc="Тестирование", leave=True, unit="batch")
     with torch.no_grad():
         for images in test_bar:
             images = images.to(device)
@@ -197,18 +205,27 @@ if __name__ == "__main__":
     tqdm.write(f"Используемое устройство: {device}")
 
     train_df, valid_df, test_df = prepare_dataframes()
-
     train_transforms, valid_transforms = prepare_transforms()
-
     train_loader, valid_loader, test_loader = prepare_data_loaders(
         train_df, valid_df, test_df, train_transforms, valid_transforms)
 
     model = prepare_model(device, test_df)
 
-    train_model(model, train_loader, valid_loader, device)
+    optimizer_stage1 = optim.AdamW(model.classifier.parameters(), lr=1e-3)
 
+    train_model(model, train_loader, valid_loader, device,
+                optimizer=optimizer_stage1, epochs=2, stage_name="Этап 1")
+
+    for param in model.parameters():
+        param.requires_grad = True
+
+    optimizer_stage2 = optim.AdamW(model.parameters(), lr=1e-5)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer_stage2, T_max=4)
+    train_model(model, train_loader, valid_loader, device,
+                optimizer=optimizer_stage2, epochs=4, stage_name="Этап 2", scheduler=scheduler)
+
+    tqdm.write("Загрузка лучшей сохраненной модели...")
     model.load_state_dict(torch.load(BEST_MODEL_PATH, weights_only=True))
 
     all_preds = test_model(device, test_loader, model)
-
     prepare_submission_file(all_preds, test_df)
