@@ -57,8 +57,8 @@ if __name__ == "__main__":
     df_labels = pd.read_csv(LABELS_CSV)
     df_sample = pd.read_csv(SAMPLE_SUB_CSV)
 
-    df_labels = df_labels.sample(n=200, random_state=42).reset_index(drop=True)
-    df_sample = df_sample.sample(n=20, random_state=42).reset_index(drop=True)
+    # df_labels = df_labels.sample(n=200, random_state=42).reset_index(drop=True)
+    # df_sample = df_sample.sample(n=20, random_state=42).reset_index(drop=True)
 
     breed_cols = list(df_sample.columns[1:])
     breed_to_idx = {breed: i for i, breed in enumerate(breed_cols)}
