@@ -150,14 +150,15 @@ if __name__ == "__main__":
     tqdm.write("Обучение завершено")
     tqdm.write(f"Лучший loss на валидации: {best_val_loss:.5f}")
 
-    model.load_state_dict(torch.load(BEST_MODEL_PATH))
+    model.load_state_dict(torch.load(BEST_MODEL_PATH, weights_only=True))
     model.eval()
     test_ids = []
     all_preds = []
 
-    tqdm.write("Предсказание на тестовом наборе")
+    tqdm.write("Предсказание на тестовом наборе...")
+    test_bar = tqdm(test_loader, desc="Тест", leave=True, unit="batch")
     with torch.no_grad():
-        for images, ids in test_loader:
+        for images, ids in test_bar:
             images = images.to(device)
             outputs = model(images)
             probabilities = torch.softmax(outputs, dim=1)
@@ -170,4 +171,4 @@ if __name__ == "__main__":
     submission_df = pd.DataFrame(all_preds, columns=breed_cols)
     submission_df.insert(0, 'id', [os.path.splitext(f)[0] for f in test_ids])
     submission_df.to_csv(OUTPUT_CSV, index=False)
-    tqdm.write(f"Файл ответов сохранен как '{OUTPUT_CSV}'. Готов к отправке!")
+    tqdm.write(f"Файл предсказаний сохранен в '{OUTPUT_CSV}'")
