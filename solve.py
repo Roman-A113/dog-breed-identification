@@ -18,7 +18,6 @@ OUTPUT_CSV = 'my_submission.csv'
 BEST_MODEL_PATH = 'best_model.pth'
 
 BATCH_SIZE = 16
-LEARNING_RATE = 1e-4
 IMAGE_SIZE = 300
 
 
@@ -214,15 +213,15 @@ if __name__ == "__main__":
     optimizer_stage1 = optim.AdamW(model.classifier.parameters(), lr=1e-3)
 
     train_model(model, train_loader, valid_loader, device,
-                optimizer=optimizer_stage1, epochs=2, stage_name="Этап 1")
+                optimizer=optimizer_stage1, epochs=5, stage_name="Этап 1")
 
     for param in model.parameters():
         param.requires_grad = True
 
     optimizer_stage2 = optim.AdamW(model.parameters(), lr=1e-5)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer_stage2, T_max=4)
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer_stage2, T_max=5)
     train_model(model, train_loader, valid_loader, device,
-                optimizer=optimizer_stage2, epochs=4, stage_name="Этап 2", scheduler=scheduler)
+                optimizer=optimizer_stage2, epochs=5, stage_name="Этап 2", scheduler=scheduler)
 
     tqdm.write("Загрузка лучшей сохраненной модели...")
     model.load_state_dict(torch.load(BEST_MODEL_PATH, weights_only=True))
