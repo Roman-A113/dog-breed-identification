@@ -146,8 +146,7 @@ if __name__ == "__main__":
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), BEST_MODEL_PATH)
-
-    tqdm.write("Обучение завершено")
+            
     tqdm.write(f"Лучший loss на валидации: {best_val_loss:.5f}")
 
     model.load_state_dict(torch.load(BEST_MODEL_PATH, weights_only=True))
@@ -155,7 +154,6 @@ if __name__ == "__main__":
     test_ids = []
     all_preds = []
 
-    tqdm.write("Предсказание на тестовом наборе...")
     test_bar = tqdm(test_loader, desc="Тест", leave=True, unit="batch")
     with torch.no_grad():
         for images, ids in test_bar:
