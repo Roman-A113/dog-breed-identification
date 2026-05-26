@@ -4,6 +4,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import random
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from torchvision import models, transforms
@@ -18,7 +19,7 @@ OUTPUT_CSV = 'my_submission.csv'
 BEST_MODEL_PATH = 'best_model.pth'
 
 BATCH_SIZE = 16
-IMAGE_SIZE = 300
+IMAGE_SIZE = 224
 
 
 class DogDataset(Dataset):
@@ -46,6 +47,18 @@ class DogDataset(Dataset):
         else:
             label = self.df.iloc[idx]['target']
             return image, torch.tensor(label, dtype=torch.long)
+
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def prepare_dataframes():
@@ -87,23 +100,20 @@ def prepare_data_loaders(train_df, valid_df, test_df, train_transforms, val_tran
     valid_dataset = DogDataset(valid_df, TRAIN_DIR, transform=val_transforms)
     test_dataset = DogDataset(test_df, TEST_DIR, transform=val_transforms, is_test=True)
 
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2)
-    valid_loader = DataLoader(valid_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
-    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+    valid_loader = DataLoader(valid_dataset, batch_size=BATCH_SIZE, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
     return train_loader, valid_loader, test_loader
 
 
 def prepare_model(device, test_df):
-    model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.DEFAULT)
-
+    model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
     for param in model.parameters():
         param.requires_grad = False
-
-    num_features = model.classifier[1].in_features
+    num_features = model.fc.in_features
     num_classes = len(test_df.columns) - 1
-    model.classifier[1] = nn.Linear(num_features, num_classes)
-
+    model.fc = nn.Linear(num_features, num_classes)
     model = model.to(device)
     return model
 
@@ -200,6 +210,7 @@ def prepare_submission_file(all_preds, test_df):
 
 
 if __name__ == "__main__":
+    set_seed(42)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     tqdm.write(f"Используемое устройство: {device}")
 
@@ -210,10 +221,12 @@ if __name__ == "__main__":
 
     model = prepare_model(device, test_df)
 
-    optimizer_stage1 = optim.AdamW(model.classifier.parameters(), lr=1e-3)
+    optimizer_stage1 = optim.AdamW(model.fc.parameters(), lr=1e-3)
 
     train_model(model, train_loader, valid_loader, device,
                 optimizer=optimizer_stage1, epochs=5, stage_name="Этап 1")
+
+    model.load_state_dict(torch.load(BEST_MODEL_PATH, weights_only=True))
 
     for param in model.parameters():
         param.requires_grad = True
