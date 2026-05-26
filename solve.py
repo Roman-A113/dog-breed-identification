@@ -11,12 +11,12 @@ from torchvision import models, transforms
 from PIL import Image
 from sklearn.model_selection import train_test_split
 
-TRAIN_DIR = 'train'
-TEST_DIR = 'test'
-LABELS_CSV = 'labels.csv'
-SAMPLE_SUB_CSV = 'sample_submission.csv'
-OUTPUT_CSV = 'my_submission.csv'
-BEST_MODEL_PATH = 'best_model.pth'
+TRAIN_DIR = 'data/train'
+TEST_DIR = 'data/test'
+LABELS_CSV = 'data/labels.csv'
+SAMPLE_SUB_CSV = 'data/sample_submission.csv'
+OUTPUT_CSV = 'data/my_submission.csv'
+BEST_MODEL_PATH = 'data/best_model.pth'
 
 BATCH_SIZE = 16
 IMAGE_SIZE = 224

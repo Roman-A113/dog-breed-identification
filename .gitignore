@@ -1,5 +1,3 @@
-.venv
-.vscode
-test
-train
-*.pth
+.venv/
+.vscode/
+data/
