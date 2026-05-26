@@ -41,8 +41,8 @@ python solve.py
 
 #### Для CPU
 
-docker run -v "path_to_data_repository":/app/data romakolesn/dog-breed-identification:v1
+docker run -v "path_to_data_repository":/app/data romakolesn/dog-breed-identification:latest
 
 #### Для NVIDIA GPU
 
-docker run --gpus all -v "path_to_data_repository":/app/data romakolesn/dog-breed-identification:v1
+docker run --gpus all -v "path_to_data_repository":/app/data romakolesn/dog-breed-identification:latest
