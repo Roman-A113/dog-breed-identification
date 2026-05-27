@@ -1,3 +1,7 @@
+Скачайте датасет с Kaggle, распакуйте его, переименуйте в `data` и добавьте в склонированный репозиторий.
+
+https://www.kaggle.com/competitions/dog-breed-identification/data
+
 ## Запуск без Docker
 
 ### 1. Создайте виртуальное окружение
@@ -41,8 +45,12 @@ python solve.py
 
 #### Для CPU
 
+```cmd
 docker run -v "path_to_data_repository":/app/data romakolesn/dog-breed-identification:latest
+```
 
 #### Для NVIDIA GPU
 
+```cmd
 docker run --gpus all -v "path_to_data_repository":/app/data romakolesn/dog-breed-identification:latest
+```
