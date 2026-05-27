@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import random
+import matplotlib.pyplot as plt
+
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from torchvision import models, transforms
@@ -164,9 +166,16 @@ def train_epoch(model, train_loader, device, criterion, optimizer, epoch, curren
     return epoch_loss
 
 
-def train_model(model, train_loader, valid_loader, device, optimizer, epochs, stage_name, scheduler=None):
+def train_model(
+        model, train_loader, valid_loader, device, optimizer, epochs, stage_name, scheduler=None,
+        best_val_loss=float('inf')):
     criterion = nn.CrossEntropyLoss()
-    best_val_loss = float('inf')
+
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'val_acc': []
+    }
 
     for epoch in range(epochs):
         epoch_loss = train_epoch(model, train_loader, device, criterion, optimizer, epoch, epochs, stage_name)
@@ -179,11 +188,16 @@ def train_model(model, train_loader, valid_loader, device, optimizer, epochs, st
             f"[{stage_name}] Эпоха {epoch+1}/{epochs} - Train Loss: {epoch_loss:.5f}, Val Loss: {valid_loss:.5f}, Val Acc: {accuracy:.2f}%"
         )
 
+        history['train_loss'].append(epoch_loss)
+        history['val_loss'].append(valid_loss)
+        history['val_acc'].append(accuracy)
+
         if valid_loss < best_val_loss:
             best_val_loss = valid_loss
             torch.save(model.state_dict(), BEST_MODEL_PATH)
 
     tqdm.write(f"[{stage_name}] Лучший loss на валидации: {best_val_loss:.5f}\n")
+    return best_val_loss, history
 
 
 def test_model(device, test_loader, model):
@@ -209,6 +223,39 @@ def prepare_submission_file(all_preds, test_df):
     tqdm.write(f"Файл предсказаний сохранен в '{OUTPUT_CSV}'")
 
 
+def plot_training_history(stage1_history, stage2_history):
+    train_loss = stage1_history['train_loss'] + stage2_history['train_loss']
+    val_loss = stage1_history['val_loss'] + stage2_history['val_loss']
+    val_acc = stage1_history['val_acc'] + stage2_history['val_acc']
+
+    epochs = range(1, len(train_loss) + 1)
+    stage1_len = len(stage1_history['train_loss'])
+
+    plt.figure(figsize=(14, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, train_loss, 'bo-', label='Train Loss')
+    plt.plot(epochs, val_loss, 'ro-', label='Val Loss')
+    plt.axvline(x=stage1_len, color='gray', linestyle='--', label='Разморозка ResNet (Этап 2)')
+    plt.title('График функции потерь (Loss)')
+    plt.xlabel('Эпохи')
+    plt.ylabel('Loss')
+    plt.legend()
+    plt.grid(True)
+
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, val_acc, 'go-', label='Val Accuracy')
+    plt.axvline(x=stage1_len, color='gray', linestyle='--', label='Разморозка ResNet (Этап 2)')
+    plt.title('Точность на валидации (Accuracy)')
+    plt.xlabel('Эпохи')
+    plt.ylabel('Точность (%)')
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.savefig('data/training_history.png')
+
+
 if __name__ == "__main__":
     set_seed(42)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -223,8 +270,8 @@ if __name__ == "__main__":
 
     optimizer_stage1 = optim.AdamW(model.fc.parameters(), lr=1e-3)
 
-    train_model(model, train_loader, valid_loader, device,
-                optimizer=optimizer_stage1, epochs=5, stage_name="Этап 1")
+    best_val_loss, stage1_history = train_model(model, train_loader, valid_loader, device,
+                                                optimizer=optimizer_stage1, epochs=8, stage_name="Этап 1")
 
     model.load_state_dict(torch.load(BEST_MODEL_PATH, weights_only=True))
 
@@ -233,8 +280,12 @@ if __name__ == "__main__":
 
     optimizer_stage2 = optim.AdamW(model.parameters(), lr=1e-5)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer_stage2, T_max=5)
-    train_model(model, train_loader, valid_loader, device,
-                optimizer=optimizer_stage2, epochs=5, stage_name="Этап 2", scheduler=scheduler)
+    best_val_loss, stage2_history = train_model(
+        model, train_loader, valid_loader, device, optimizer=optimizer_stage2, epochs=5, stage_name="Этап 2",
+        scheduler=scheduler, best_val_loss=best_val_loss)
+
+    tqdm.write("Построение графиков обучения...")
+    plot_training_history(stage1_history, stage2_history)
 
     tqdm.write("Загрузка лучшей сохраненной модели...")
     model.load_state_dict(torch.load(BEST_MODEL_PATH, weights_only=True))
